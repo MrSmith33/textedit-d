@@ -4,7 +4,7 @@ License: a$(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors: Andrey Penechko.
 */
 
-module anchovy.gui.editor.textbuffer;
+module editor.textbuffer;
 
 import std.container : DList;
 import std.array : array, RefAppender, Appender, appender;
@@ -362,7 +362,7 @@ struct PieceTable
 		/// Input range primitives.
 		@property bool empty() const 
 		{
-			return !_head && _length > 0;
+			return !_head || _length == 0;
 		}
 
 		@property size_t length()
