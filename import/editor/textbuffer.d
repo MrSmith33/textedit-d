@@ -346,7 +346,7 @@ struct PieceTable
 		private size_t _pieceLength;
 		private size_t _length;
 
-		private this(Piece* piece, size_t length, string buffer)
+		private this(Piece* piece, size_t piecePos, size_t length, string buffer)
 		{
 			_head = piece;
 			_length = length;
@@ -355,7 +355,7 @@ struct PieceTable
 			if (_head)
 			{
 				_pieceLength = _head.length;
-				_sequence = _buffer[_head.position..$];
+				_sequence = _buffer[piecePos..$];
 			}
 		}
 
@@ -408,8 +408,50 @@ struct PieceTable
 
     Range opSlice()
     {
-        return Range(_sequence.front, _sequence.length, cast(string)_buffer.data);
+    	if (!_sequence.length)
+    		return Range(null, 0, 0, null);
+
+        return Range(_sequence.front, _sequence.front.position,
+        	_sequence.length, cast(string)_buffer.data);
     }
+
+    Range opSlice(size_t x, size_t y)
+    {
+    	assert(y - x - 1 > 0);
+    	assert(x < y);
+    	
+    	if (y > length)
+    	{
+    		y = length;
+    	}
+
+    	if (x >= _sequence.length || y - x < 1)
+    	{
+    		return Range(null, 0, 0, null);
+    	}
+
+    	auto pair = _sequence.pieceAt!(Previous.yes)(x);
+        return Range(pair.piece,
+        	pair.piece.position + charlength(_buffer.data[pair.piece.position..$], x-pair.piecePos),
+        	y - x,
+        	cast(string)_buffer.data);
+    }
+
+	size_t opDollar()
+	{
+		return length;
+	}
+
+	unittest
+	{
+		PieceTable table = PieceTable("абвгде");
+
+		assert(table[0..$].equal(table[]));
+		assert(table[3..$].equal("где"));
+		assert(table[0..3].equal("абв"));
+		assertThrown!AssertError(table[3..1]);
+		assert(table[0..100].equal(table[]));
+	}
 
 	size_t length() @property
 	{
@@ -517,7 +559,6 @@ struct PieceTable
 		table.remove(0, 1); // case 1
 		assert(table.length == 5);
 		assert(table._sequence.front == piece1);
-		writeln(table[]);
 		assert(equal(table[], "бвгде"));
 
 		table.remove(0, 6); // case 2
