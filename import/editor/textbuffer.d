@@ -6,13 +6,16 @@ Authors: Andrey Penechko.
 
 module editor.textbuffer;
 
+
 import std.container : DList;
 import std.array : array, RefAppender, Appender, appender;
 import std.range;
-import std.algorithm;
+//import std.algorithm;
 import std.exception : assumeUnique, assertThrown;
 import std.typecons;
-import std.utf;
+import std.utf : count;
+import std.uni;
+import std.format : format;
 
 import core.exception : AssertError;
 
@@ -31,26 +34,65 @@ private struct Piece
 	size_t length;
 
 	Piece* next;
+
+	string toString()
+	{
+		return format("P%s:L%s", position, length);
+	}
+}
+
+private struct PieceRange
+{
+	// before pieceRange
+	Piece* prev;
+
+	// head of piece range
+	Piece* first;
+
+	// length in dchars.
+	size_t length;
 }
 
 alias PiecePair = Tuple!(Piece*, "prev", Piece*, "piece", size_t, "piecePos");
 
 enum Previous {no, yes};
 
+private PieceStorage pieceStorage()
+{
+	PieceStorage storage;
+	storage.front.next = storage.back;
+	return storage;
+}
+
 private struct PieceStorage
 {
-	Piece* front;
-	Piece* back;
+	Piece* back = new Piece;
+	Piece* front = new Piece;
 
 	// length in dchars.
 	size_t length;
 
+	string toString()
+	{
+		auto app = appender!string;
+		auto piece = front;
+		while(piece != null)
+		{
+			app ~= piece.toString;
+			app ~= "\n";
+			piece = piece.next;
+		}
+
+		return app.data;
+	}
+
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 		
-		assert(storage.front == null);
-		assert(storage.back == null);
+		assert(storage.front != storage.back);
+		assert((*storage.front).length == 0);
+		assert((*storage.back).length == 0);
 		assert(storage.length == 0);
 	}
 
@@ -62,9 +104,9 @@ private struct PieceStorage
 	body
 	{
 		static if (returnPrev == Previous.yes)
-			Piece* prev;
+			Piece* prev = front;
 
-		Piece* piece = front;
+		Piece* piece = front.next;
 		size_t textPosition;
 
 		while (index >= textPosition + piece.length)
@@ -84,7 +126,7 @@ private struct PieceStorage
 
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 
 		auto piece1 = new Piece(10, 2);
 		storage.insertBack(piece1);
@@ -103,8 +145,8 @@ private struct PieceStorage
 		assert(storage.pieceAt(5) == piece3);
 		assertThrown!AssertError(storage.pieceAt(6));
 
-		assert(storage.pieceAt!(Previous.yes)(0) == PiecePair(null, piece1, 0));
-		assert(storage.pieceAt!(Previous.yes)(1) == PiecePair(null, piece1, 0));
+		assert(storage.pieceAt!(Previous.yes)(0) == PiecePair(storage.front, piece1, 0));
+		assert(storage.pieceAt!(Previous.yes)(1) == PiecePair(storage.front, piece1, 0));
 		assert(storage.pieceAt!(Previous.yes)(2) == PiecePair(piece1, piece2, 2));
 		assert(storage.pieceAt!(Previous.yes)(3) == PiecePair(piece1, piece2, 2));
 		assert(storage.pieceAt!(Previous.yes)(4) == PiecePair(piece2, piece3, 4));
@@ -118,37 +160,29 @@ private struct PieceStorage
 		
 		length += piece.length;
 
-		// zero elements in list
-		if (back is null)
-		{
-			assert(front is null);
-
-			back = piece;
-		}
-
-		piece.next = front;
-		front = piece;
+		piece.next = front.next;
+		front.next = piece;
 	}
 
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 
 		auto piece1 = new Piece(0, 2);
 		storage.insertFront(piece1);
 
-		assert(storage.front == piece1);
-		assert(storage.back == piece1);
+		assert(storage.front.next == piece1);
+		assert(storage.back == storage.front.next.next);
 		assert(storage.length == 2);
 
 		auto piece2 = new Piece(4, 2);
 		storage.insertFront(piece2);
 
-		assert(storage.front == piece2);
-		assert(storage.back == piece1);
+		assert(storage.front.next == piece2);
+		assert(storage.front.next.next == piece1);
 		assert(storage.length == 4);
 
-		assert(piece1.next == null);
+		assert(piece1.next == storage.back);
 		assert(piece2.next == piece1);
 	}
 
@@ -158,43 +192,37 @@ private struct PieceStorage
 
 		length += piece.length;
 		
-		// zero elements in list
-		if (back is null)
+		auto prev = front;
+
+		while(prev.next != back)
 		{
-			assert(front is null);
-
-			piece.next = front;
-			front = piece;
-			back = piece;
-			return;
+			prev = prev.next;
 		}
-		
-		assert(back.next is null);
 
-		back.next = piece;
-		back = piece;
+		prev.next = piece;
+		piece.next = back;
 	}
 
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 
 		auto piece1 = new Piece(0, 2);
 		storage.insertBack(piece1);
 
-		assert(storage.front == piece1);
-		assert(storage.back == piece1);
+		assert(storage.front.next == piece1);
+		assert(storage.front.next.next == storage.back);
 		assert(storage.length == 2);
 
 		auto piece2 = new Piece(4, 2);
 		storage.insertBack(piece2);
 
-		assert(storage.front == piece1);
-		assert(storage.back == piece2);
+		assert(storage.front.next == piece1);
+		assert(storage.front.next.next == piece2);
 		assert(storage.length == 4);
 		
 		assert(piece1.next == piece2);
-		assert(piece2.next == null);
+		assert(piece2.next == storage.back);
 	}
 
 	/// inserts newPiece after prev
@@ -207,7 +235,7 @@ private struct PieceStorage
 
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 
 		auto piece1 = new Piece(0, 2);
 		storage.insertBack(piece1);
@@ -230,18 +258,6 @@ private struct PieceStorage
 
 		scope(success) length -= pieceToRemove.length;
 
-		if (pieceToRemove == front)
-		{
-			front = pieceToRemove.next;
-			
-			if (pieceToRemove == back)
-			{
-				back = null;
-			}
-
-			return;
-		}
-
 		Piece* prev = front;
 
 		while(prev.next != pieceToRemove)
@@ -250,16 +266,11 @@ private struct PieceStorage
 		}
 
 		prev.next = pieceToRemove.next;
-		
-		if (pieceToRemove == back)
-		{
-			back = prev;
-		}
 	}
 
 	unittest
 	{
-		PieceStorage storage;
+		PieceStorage storage = pieceStorage();
 
 		auto piece1 = new Piece(0, 2);
 		storage.insertBack(piece1);
@@ -283,25 +294,23 @@ private struct PieceStorage
 
 		// Remove front
 		storage.remove(piece1);
-		assert(storage.front == piece3);
+		assert(storage.front.next == piece3);
 		assert(storage.length == 14);
 
 		// Remove back
 		storage.remove(piece4);
-		assert(storage.back == piece3);
-		assert(piece3.next == null);
+		assert(storage.front.next == piece3);
+		assert(piece3.next == storage.back);
 		assert(storage.length == 6);
 
 		// Remove last
 		storage.remove(piece3);
-		assert(storage.front == null);
-		assert(storage.back == null);
+		assert(storage.front.next == storage.back);
 		assert(storage.length == 0);
 
 		storage.insertBack(piece1);
 		storage.remove(piece1);
-		assert(storage.front == null);
-		assert(storage.back == null);
+		assert(storage.front.next == storage.back);
 	}
 }
 
@@ -322,12 +331,15 @@ struct PieceTable
 
 	// Stores original text followed by inserted text.
 	private Appender!(char[]) _buffer;
+	private Appender!(PieceRange[]) _undoStack;
+	private Appender!(PieceRange[]) _redoStack;
 	alias _bufferData = _buffer.data;
 
 	private PieceStorage _sequence;
 
 	this(S)(S initialText)
 	{
+		_sequence = pieceStorage();
 		_buffer ~= initialText;
 		_sequence.insertBack(new Piece(0, initialText.count!char));
 	}
@@ -411,7 +423,7 @@ struct PieceTable
     	if (!_sequence.length)
     		return Range(null, 0, 0, null);
 
-        return Range(_sequence.front, _sequence.front.position,
+        return Range(_sequence.front.next, _sequence.front.next.position,
         	_sequence.length, cast(string)_buffer.data);
     }
 
@@ -459,6 +471,21 @@ struct PieceTable
 	}
 
 	/// Remove sequence of text starting at index of length length
+	/*
+	 *    |---------| - Piece
+	 *
+	 * 1. |XXXXX----| - Remove from begining to the middle
+	 *
+	 * 2. |XXXXXXXXX| - Remove whole piece
+	 *
+	 * 3. |XXXXXXXXX|XXX... - Remove whole piece and past piece
+	 *
+	 * 4. |--XXXXX--| - Remove in the middle of piece
+	 *
+	 * 5. |--XXXXXXX| - Remove from middle to the end of piece
+	 *
+	 * 6. |--XXXXXXX|XXX... - Remove from middle and past piece
+	 */
 	void remove(size_t removePos, size_t removeLength)
 	{
 		if (removePos >= _sequence.length || removeLength == 0) return;
@@ -470,7 +497,7 @@ struct PieceTable
 			removeLength = length - removePos;
 		}
 
-		//Piece* prev = pair.prev;
+		Piece* prev = pair.prev;
 		Piece* piece = pair.piece;
 		size_t piecePos = pair.piecePos;
 
@@ -480,9 +507,10 @@ struct PieceTable
 			{
 				if (piece.length > removeLength) // 1 case
 				{
-					piece.position += charlength(_buffer.data[piece.position..$], removeLength);
+					prev.next = new Piece(piece.position + charlength(_buffer.data[piece.position..$], removeLength),
+						piece.length - removeLength,
+						piece.next);
 					_sequence.length -= removeLength;
-					piece.length -= removeLength;
 					
 					return;
 				}
@@ -554,31 +582,26 @@ struct PieceTable
 		PieceTable table = PieceTable("абвгде");
 
 		assert(table.length == 6);
-		auto piece1 = table._sequence.front;
+		auto piece1 = table._sequence.front.next;
 
 		table.remove(0, 1); // case 1
 		assert(table.length == 5);
-		assert(table._sequence.front == piece1);
 		assert(equal(table[], "бвгде"));
 
 		table.remove(0, 6); // case 2
 		assert(table.length == 0);
-		assert(table._sequence.front == null);
-		assert(table._sequence.back == null);
 		assert(equal(table[], ""));
 
 		table = PieceTable("абвгде");
 
 		table.remove(2, 1); // case 4
-		assert(table._sequence.front.length == 2);
-		assert(table._sequence.front.next.length == 3);
+		assert(table._sequence.front.next.length == 2);
+		assert(table._sequence.front.next.next.length == 3);
 		assert(table.length == 5);
 		assert(equal(table[], "абгде"));
 
 		table.remove(0, 5); // case 3 + case 2
 		assert(table.length == 0);
-		assert(table._sequence.front == null);
-		assert(table._sequence.back == null);
 		assert(equal(table[], ""));
 
 		table = PieceTable("абвгде");
@@ -595,34 +618,35 @@ struct PieceTable
 		assert(equal(table[], "а"));
 	}
 
-	void insert(S)(size_t index, S text)
+	void insert(S)(size_t insertPos, S text)
+		if (isSomeString!S || (isInputRange!S && isSomeChar!(ElementType!S)))
 	{
-		size_t textLength = text.count!char;
+		size_t textLength = text.byGrapheme.walkLength;//text.count!char;
 		size_t bufferPos = _buffer.data.length;
 		_buffer ~= text;
 
 		Piece* middlePiece = new Piece(bufferPos, textLength);
 
-		if (index == 0) // At the begining of text
+		if (insertPos == 0) // At the begining of text
 		{
 			_sequence.insertFront(middlePiece);
 			return;
 		}
-		else if (index == _sequence.length) // At the end of text
+		else if (insertPos == _sequence.length) // At the end of text
 		{
 			_sequence.insertBack(middlePiece);
 			return;
 		}
 
-		auto pair = _sequence.pieceAt!(Previous.yes)(index);
+		auto pair = _sequence.pieceAt!(Previous.yes)(insertPos);
 
-		if (index == pair.piecePos) // At the begining of piece
+		if (insertPos == pair.piecePos) // At the begining of piece
 		{
 			_sequence.insertAfter(middlePiece, pair.prev);
 		}
 		else // In the middle of piece
 		{
-			auto leftPieceLength = index - pair.piecePos;
+			auto leftPieceLength = insertPos - pair.piecePos;
 			auto rightPiecePos = pair.piece.position + 
 				charlength(_buffer.data[pair.piece.position..$], leftPieceLength);
 			
@@ -652,5 +676,11 @@ struct PieceTable
 		table.insert(3, "ggg");
 		assert(table.length == 9);
 		assert(equal(table[], "абвgggгде"));
+
+		//table.insert(0, 'a'.repeat(3));
+		//assert(table[].equal("aaaабвgggгде"));
+		//assert(is(isRandomAccessRange!('a'.repeat(3))));
+		//table.insert(0, "abc".byCodePoint);
+		//assert(equal(table[], "abcaaaабвgggгде"));
 	}
 }
