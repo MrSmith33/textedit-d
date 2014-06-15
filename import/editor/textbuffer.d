@@ -49,11 +49,16 @@ private struct PieceRange
 	// head of piece range
 	Piece* first;
 
-	// length in dchars.
-	size_t length;
+	// length of the whole sequence in dchars.
+	size_t sequenceLength;
 
 	// Piece ranges in one group have the same flag.
 	bool group;
+
+	string toString()
+	{
+		return format("prev %s first %s group %s", *prev, *first, group);
+	}
 }
 
 alias PiecePair = Tuple!(Piece*, "prev", Piece*, "piece", size_t, "piecePos");
@@ -69,6 +74,7 @@ private PieceStorage pieceStorage()
 
 private struct PieceStorage
 {
+	Appender!(char[]) buffer;
 	Piece* back = new Piece;
 	Piece* front = new Piece;
 
@@ -147,14 +153,11 @@ private struct PieceStorage
 		assertThrown!AssertError(storage.pieceAt(6));
 	}
 
-	void insertFront(Piece* piece)
+	PieceRange insertFront(Piece* piece)
 	{
 		assert(piece);
-		
-		length += piece.length;
 
-		piece.next = front.next;
-		front.next = piece;
+		return insertAt(piece, 0);
 	}
 
 	unittest
@@ -179,21 +182,11 @@ private struct PieceStorage
 		assert(piece2.next == piece1);
 	}
 
-	void insertBack(Piece* piece)
+	PieceRange insertBack(Piece* piece)
 	{
 		assert(piece);
 
-		length += piece.length;
-		
-		auto prev = front;
-
-		while(prev.next != back)
-		{
-			prev = prev.next;
-		}
-
-		prev.next = piece;
-		piece.next = back;
+		return insertAt(piece, length);
 	}
 
 	unittest
@@ -219,11 +212,15 @@ private struct PieceStorage
 	}
 
 	/// inserts newPiece after prev
-	void insertAfter(Piece* newPiece, Piece* prev)
+	PieceRange insertAfter(Piece* newPiece, Piece* prev)
 	{
+		PieceRange restoreRange = PieceRange(prev, prev.next, length);
+
 		newPiece.next = prev.next;
 		prev.next = newPiece;
 		length += newPiece.length;
+
+		return restoreRange;
 	}
 
 	unittest
@@ -242,68 +239,69 @@ private struct PieceStorage
 		assert(piece3.next == piece2);
 	}
 
-	// Removes Piece that is presented inside storage.
-	// Assumes that pieceToRemove is presented. Will Error otherwise.
-	// pieceToRemove.next is not changed.
-	void remove(Piece* pieceToRemove)
+	PieceRange insertAt(Piece* middlePiece, size_t insertPos)
 	{
-		assert(pieceToRemove);
+		assert(middlePiece);
 
-		scope(success) length -= pieceToRemove.length;
-
-		Piece* prev = front;
-
-		while(prev.next != pieceToRemove)
+		if (insertPos == 0) // At the begining of text
 		{
-			prev = prev.next;
+			PieceRange restoreRange = PieceRange(front, front.next, length);
+		
+			length += middlePiece.length;
+
+			middlePiece.next = front.next;
+			front.next = middlePiece;
+
+			return restoreRange;
+		}
+		else if (insertPos == length) // At the end of text
+		{
+			auto prev = front;
+
+			while(prev.next != back)
+			{
+				prev = prev.next;
+			}
+
+			PieceRange restoreRange = PieceRange(prev, prev.next, length);
+			
+			length += middlePiece.length;
+
+			prev.next = middlePiece;
+			middlePiece.next = back;
+
+			return restoreRange;
 		}
 
-		prev.next = pieceToRemove.next;
-	}
+		auto pair = pieceAt(insertPos);
 
-	unittest
-	{
-		PieceStorage storage = pieceStorage();
+		if (insertPos == pair.piecePos) // At the begining of piece
+		{
+			PieceRange restoreRange = PieceRange(pair.prev, pair.prev.next, length);
 
-		auto piece1 = new Piece(0, 2);
-		storage.insertBack(piece1);
-		auto piece2 = new Piece(0, 4);
-		storage.insertBack(piece2);
-		auto piece3 = new Piece(0, 6);
-		storage.insertBack(piece3);
-		auto piece4 = new Piece(0, 8);
-		storage.insertBack(piece4);
+			middlePiece.next = pair.prev.next;
+			pair.prev.next = middlePiece;
+			length += middlePiece.length;
 
-		assert(storage.length == 20);
-		import std.stdio;
-		
-		// Remove in the middle
-		storage.remove(piece2);
-		assert(piece1.next == piece3);
-		assert(storage.length == 16);
+			return restoreRange;
+		}
+		else // In the middle of piece
+		{
+			auto restoreRange = PieceRange(pair.prev, pair.piece, length);
 
-		// Remove not present
-		assertThrown!Error(storage.remove(piece2)); // Access violation.
+			length += middlePiece.length;
 
-		// Remove front
-		storage.remove(piece1);
-		assert(storage.front.next == piece3);
-		assert(storage.length == 14);
+			auto leftPieceLength = insertPos - pair.piecePos;
+			auto rightPiecePos = pair.piece.position + 
+				charlength(buffer.data[pair.piece.position..$], leftPieceLength);
+			
+			Piece* leftPiece = createPiece(pair.piece.position, leftPieceLength, middlePiece);
+			Piece* rightPiece = createPiece(rightPiecePos, pair.piece.length - leftPieceLength, pair.piece.next);
+			middlePiece.next = rightPiece;
+			pair.prev.next = leftPiece;
 
-		// Remove back
-		storage.remove(piece4);
-		assert(storage.front.next == piece3);
-		assert(piece3.next == storage.back);
-		assert(storage.length == 6);
-
-		// Remove last
-		storage.remove(piece3);
-		assert(storage.front.next == storage.back);
-		assert(storage.length == 0);
-
-		storage.insertBack(piece1);
-		storage.remove(piece1);
-		assert(storage.front.next == storage.back);
+			return restoreRange;
+		}
 	}
 }
 
@@ -317,27 +315,26 @@ size_t charlength(S)(S data, size_t dcharLength)
 	return oldLength - newLength;
 }
 
+private Piece* createPiece(size_t position = 0, size_t length = 0, Piece* next = null)
+{
+	return new Piece(position, length, next);
+}
+
 import std.stdio;
 struct PieceTable
 {
-	alias E = char;
-
 	// Stores original text followed by inserted text.
-	private Appender!(char[]) _buffer;
 	private Appender!(PieceRange[]) _undoStack;
 	private Appender!(PieceRange[]) _redoStack;
-	private bool _isGrouping;
-	alias _bufferData = _buffer.data;
+	private bool _currentGroup;
+	private bool _isGrouping = false;
 
 	private PieceStorage _sequence;
-
-	private Piece* createPiece(size_t position = 0, size_t length = 0, Piece* next = null)
-	{
-		return new Piece(position, length, next);
-	}
+	alias _bufferData = _sequence.buffer.data;
 
 	void beginGroup()
 	{
+		_currentGroup = !_currentGroup;
 		_isGrouping = true;
 	}
 
@@ -346,26 +343,27 @@ struct PieceTable
 		_isGrouping = false;
 	}
 
-	// Get next group flag for undo range.
-	private @property bool nextUndoGroup()
+	private @property bool nextGroup()
 	{
-		if (_undoStack.data.length > 0)
+		if (!_isGrouping)
 		{
-			if (_isGrouping)
-				return _undoStack.data[$-1].group;
-			else
-				return !_undoStack.data[$-1].group;
+			_currentGroup = !_currentGroup;
 		}
-		else
-		{
-			return false;
-		}
+
+		return _currentGroup;
+	}
+
+	private void commitUndo(PieceRange range)
+	{
+		range.group = nextGroup;
+		_undoStack ~= range;
+		_redoStack.shrinkTo(0);
 	}
 
 	this(S)(S initialText)
 	{
 		_sequence = pieceStorage();
-		_buffer ~= initialText;
+		_sequence.buffer ~= initialText;
 		_sequence.insertBack(createPiece(0, initialText.count!char));
 	}
 
@@ -373,9 +371,10 @@ struct PieceTable
 	{
 		PieceTable table = PieceTable("test");
 		assert(table.length == 4);
+		assert(table._undoStack.data.empty);
 	}
 
-	struct Range
+	private struct Range
 	{
 		private Piece* _head;
 		private string _buffer;
@@ -480,7 +479,7 @@ struct PieceTable
     		return Range(null, 0, 0, null);
 
         return Range(_sequence.front.next, _sequence.front.next.position,
-        	_sequence.length, cast(string)_buffer.data);
+        	_sequence.length, cast(string)_sequence.buffer.data);
     }
 
     Range opSlice(size_t x, size_t y)
@@ -500,9 +499,9 @@ struct PieceTable
 
     	auto pair = _sequence.pieceAt(x);
         return Range(pair.piece,
-        	pair.piece.position + charlength(_buffer.data[pair.piece.position..$], x-pair.piecePos),
+        	pair.piece.position + charlength(_sequence.buffer.data[pair.piece.position..$], x-pair.piecePos),
         	y - x,
-        	cast(string)_buffer.data);
+        	cast(string)_sequence.buffer.data);
     }
 
 	size_t opDollar()
@@ -577,7 +576,7 @@ struct PieceTable
 		// Handle cases 1 and 4
 		if (removeEnd < lastEnd)
 		{
-			auto offset = charlength(_buffer.data[last.piece.position..$],
+			auto offset = charlength(_sequence.buffer.data[last.piece.position..$],
 				removeEnd - last.piecePos + 1);
 			newPieces.next = createPiece(last.piece.position + offset,
 				lastEnd - removeEnd);
@@ -586,7 +585,7 @@ struct PieceTable
 
 		newPieces.next = last.piece.next;
 
-		_undoStack ~= PieceRange(first.prev, first.piece, removeLength);
+		commitUndo(PieceRange(first.prev, first.piece, _sequence.length));
 
 		_sequence.length -= removeLength;
 	}
@@ -648,42 +647,12 @@ struct PieceTable
 		if (isSomeString!S || (isInputRange!S && isSomeChar!(ElementType!S)))
 	{
 		size_t textLength = text.byGrapheme.walkLength;//text.count!char;
-		size_t bufferPos = _buffer.data.length;
-		_buffer ~= text;
+		size_t bufferPos = _sequence.buffer.data.length;
+		_sequence.buffer ~= text;
 
-		Piece* middlePiece = new Piece(bufferPos, textLength);
+		Piece* middlePiece = createPiece(bufferPos, textLength);
 
-		if (insertPos == 0) // At the begining of text
-		{
-			_sequence.insertFront(middlePiece);
-			return;
-		}
-		else if (insertPos == _sequence.length) // At the end of text
-		{
-			_sequence.insertBack(middlePiece);
-			return;
-		}
-
-		auto pair = _sequence.pieceAt(insertPos);
-
-		if (insertPos == pair.piecePos) // At the begining of piece
-		{
-			_sequence.insertAfter(middlePiece, pair.prev);
-		}
-		else // In the middle of piece
-		{
-			auto leftPieceLength = insertPos - pair.piecePos;
-			auto rightPiecePos = pair.piece.position + 
-				charlength(_buffer.data[pair.piece.position..$], leftPieceLength);
-			
-			Piece* rightPiece = new Piece(rightPiecePos, pair.piece.length - leftPieceLength);
-			
-			pair.piece.length = leftPieceLength;
-			_sequence.length -= rightPiece.length;
-
-			_sequence.insertAfter(middlePiece, pair.piece);
-			_sequence.insertAfter(rightPiece, middlePiece);
-		}
+		commitUndo(_sequence.insertAt(middlePiece, insertPos));
 	}
 
 	unittest
@@ -708,5 +677,144 @@ struct PieceTable
 		//assert(is(isRandomAccessRange!('a'.repeat(3))));
 		//table.insert(0, "abc".byCodePoint);
 		//assert(equal(table[], "abcaaaабвgggгде"));
+	}
+
+	void undo()
+	{
+		undoRedo!true();
+	}
+
+	void redo()
+	{
+		undoRedo!false();
+	}
+
+	@property size_t undoSize() { return _undoStack.data.length; }
+	@property size_t redoSize() { return _redoStack.data.length; }
+
+	private void undoRedo(bool undo)()
+	{
+		static if (undo)
+		{
+			auto fromStack = &_undoStack;
+			auto toStack = &_redoStack;
+		}
+		else
+		{
+			auto fromStack = &_redoStack;
+			auto toStack = &_undoStack;
+		}
+
+		if (fromStack.data.length == 0) return;
+
+		bool group = fromStack.data.back.group;
+
+		while (!fromStack.data.empty && fromStack.data.back.group == group)
+		{
+			// Get item to restore
+			PieceRange restoreItem = fromStack.data.back;
+			fromStack.shrinkTo(fromStack.data.length - 1);
+
+			// Save current state
+			PieceRange undoItem = PieceRange(restoreItem.prev, restoreItem.prev.next, _sequence.length);
+
+			// Restore state
+			*toStack ~= undoItem;
+			restoreItem.prev.next = restoreItem.first;
+			_sequence.length = restoreItem.sequenceLength;
+		}
+
+		if (!_undoStack.data.empty)
+			_currentGroup = !_undoStack.data.back.group;
+	}
+
+	// Test undo/redo.
+	unittest
+	{
+		PieceTable table = PieceTable("абвгде");
+
+		assert(table.undoSize == 0);
+
+		table.remove(2, 2);
+		assert(table[].equal("абде"));
+
+		assert(table.undoSize == 1);
+
+		table.undo();
+		assert(table[].equal("абвгде"));
+
+		assert(table.undoSize == 0);
+		assert(table.redoSize == 1);
+
+		table.redo();
+		assert(table[].equal("абде"));
+
+		table = PieceTable("абвгде");
+
+		table.insert(2, "qw");
+		assert(table.undoSize == 1);
+
+		table.undo();
+		assert(table[].equal("абвгде"));
+		table.redo();
+		assert(table[].equal("абqwвгде"));
+	}
+
+	// Test undo/redo grouping.
+	unittest
+	{
+		PieceTable table = PieceTable("абвгде");
+
+		table.beginGroup();
+		table.insert(2, "12");
+		table.remove(4, 2);
+		table.endGroup();
+		assert(table[].equal("аб12де"));
+
+		table.beginGroup();
+		table.insert(2, "12");
+		table.remove(4, 2);
+		table.endGroup();
+		assert(table[].equal("аб12де"));
+
+		table.remove(2, 2);
+		assert(table[].equal("абде"));
+
+		table.beginGroup();
+		table.insert(2, "12");
+		table.endGroup();
+		assert(table[].equal("аб12де"));
+
+
+		table.undo();
+		assert(table[].equal("абде"));
+		
+		table.undo();
+		assert(table[].equal("аб12де"));
+		
+		table.undo();
+		assert(table[].equal("аб12де"));
+
+		table.undo();
+		assert(table[].equal("абвгде"));
+	}
+
+	// Test redo discarding
+	unittest
+	{
+		PieceTable table = PieceTable("абвгде");
+
+		table.beginGroup();
+		table.insert(0, "a");
+		table.insert(0, "a");
+		table.insert(0, "a");
+		table.insert(0, "a");
+		table.endGroup();
+
+		table.undo();
+		assert(table._redoStack.data.length == 4);
+
+		table.insert(0, "a");
+		assert(table._redoStack.data.length == 0);
 	}
 }
