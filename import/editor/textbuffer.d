@@ -567,20 +567,24 @@ struct PieceTable
 
 		Piece* newPieces = first.prev;
 
+		// handle cases 4, 5 and 6.
 		if (removePos > first.piecePos)
 		{
 			newPieces.next = createPiece(first.piece.position, removePos - first.piecePos);
 			newPieces = newPieces.next;
 		}
 
+		// Handle cases 1 and 4
 		if (removeEnd < lastEnd)
 		{
 			auto offset = charlength(_buffer.data[last.piece.position..$],
 				removeEnd - last.piecePos + 1);
 			newPieces.next = createPiece(last.piece.position + offset,
-				lastEnd - removeEnd,
-				last.piece.next);
+				lastEnd - removeEnd);
+			newPieces = newPieces.next;
 		}
+
+		newPieces.next = last.piece.next;
 
 		_undoStack ~= PieceRange(first.prev, first.piece, removeLength);
 
@@ -626,6 +630,18 @@ struct PieceTable
 		table.remove(1, 5); // case 6 + case 2
 		assert(table.length == 1);
 		assert(equal(table[], "а"));
+
+		table = PieceTable("аб");
+		table.insert("вг");
+		table.insert("де");
+		table.remove(2, 2);
+		assert(table[].equal("абде"));
+	}
+
+	void insert(S)(S text)
+		if (isSomeString!S || (isInputRange!S && isSomeChar!(ElementType!S)))
+	{
+		insert(length, text);
 	}
 
 	void insert(S)(size_t insertPos, S text)
