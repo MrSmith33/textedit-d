@@ -7,15 +7,13 @@ Authors: Andrey Penechko.
 module editor.textbuffer;
 
 
-import std.container : DList;
-import std.array : array, RefAppender, Appender, appender;
-import std.range;
-//import std.algorithm;
+import std.array : Appender, appender, empty, back, front, popFront;
 import std.exception : assumeUnique, assertThrown;
-import std.typecons;
-import std.utf : count;
-import std.uni;
 import std.format : format;
+import std.range : isForwardRange, hasSlicing, walkLength, equal, dropExactly;
+import std.typecons : Tuple;
+import std.uni : byGrapheme;
+import std.utf : count;
 
 import core.exception : AssertError;
 
@@ -95,6 +93,7 @@ private struct PieceStorage
 		return app.data;
 	}
 
+	// test fresh storage.
 	unittest
 	{
 		PieceStorage storage = pieceStorage();
@@ -105,12 +104,14 @@ private struct PieceStorage
 		assert(storage.length == 0);
 	}
 
+	// Find piece at position index.
 	PiecePair pieceAt(size_t index)
 	{
 		assert(index < length);
 		return pieceAt(index, PiecePair(front, front.next, 0));
 	}
 
+	// Can be used to continue searching for next position.
 	PiecePair pieceAt(size_t index, PiecePair pair)
 	{
 		assert(index < length);
