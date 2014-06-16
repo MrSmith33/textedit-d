@@ -9,18 +9,13 @@ module editor.textbuffer;
 
 import std.array : Appender, appender, empty, back, front, popFront;
 import std.exception : assumeUnique, assertThrown;
-import std.format : format;
+import std.string : format;
 import std.range : isForwardRange, hasSlicing, walkLength, equal, dropExactly;
 import std.typecons : Tuple;
 import std.uni : byGrapheme;
 import std.utf : count;
 
 import core.exception : AssertError;
-
-template isTextBuffer(T)
-{
-	enum isTextBuffer = false;
-}
 
 // Refers to a piece in a buffer.
 private struct Piece
@@ -59,9 +54,9 @@ private struct PieceRange
 	}
 }
 
-alias PiecePair = Tuple!(Piece*, "prev", Piece*, "piece", size_t, "piecePos");
+private alias PiecePair = Tuple!(Piece*, "prev", Piece*, "piece", size_t, "piecePos");
 
-enum Previous {no, yes};
+private enum Previous {no, yes};
 
 private PieceStorage pieceStorage()
 {
