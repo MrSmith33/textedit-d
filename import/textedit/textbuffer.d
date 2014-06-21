@@ -4,7 +4,7 @@ License: a$(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors: Andrey Penechko.
 */
 
-module editor.textbuffer;
+module textedit.textbuffer;
 
 
 import std.array : Appender, appender, empty, back, front, popFront;
@@ -54,7 +54,12 @@ private struct PieceRange
 	}
 }
 
-private alias PiecePair = Tuple!(Piece*, "prev", Piece*, "piece", size_t, "piecePos");
+private struct PiecePair
+{
+	Piece* prev;
+	Piece* piece;
+	size_t piecePos;
+}
 
 private enum Previous {no, yes};
 
@@ -207,50 +212,11 @@ private struct PieceStorage
 		assert(piece2.next == storage.back);
 	}
 
-	/// inserts newPiece after prev
-	PieceRange insertAfter(Piece* newPiece, Piece* prev)
-	{
-		PieceRange restoreRange = PieceRange(prev, prev.next, length);
-
-		newPiece.next = prev.next;
-		prev.next = newPiece;
-		length += newPiece.length;
-
-		return restoreRange;
-	}
-
-	unittest
-	{
-		PieceStorage storage = pieceStorage();
-
-		auto piece1 = new Piece(0, 2);
-		storage.insertBack(piece1);
-		auto piece2 = new Piece(0, 4);
-		storage.insertBack(piece2);
-
-		auto piece3 = new Piece(0, 6);
-		storage.insertAfter(piece3, piece1);
-		assert(storage.length == 12);
-		assert(piece1.next == piece3);
-		assert(piece3.next == piece2);
-	}
-
 	PieceRange insertAt(Piece* middlePiece, size_t insertPos)
 	{
 		assert(middlePiece);
-
-		if (insertPos == 0) // At the begining of text
-		{
-			PieceRange restoreRange = PieceRange(front, front.next, length);
 		
-			length += middlePiece.length;
-
-			middlePiece.next = front.next;
-			front.next = middlePiece;
-
-			return restoreRange;
-		}
-		else if (insertPos == length) // At the end of text
+		if (insertPos == length) // At the end of text
 		{
 			auto prev = front;
 
